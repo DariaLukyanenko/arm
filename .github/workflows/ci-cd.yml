@@ -23,7 +23,7 @@ jobs:
           POSTGRES_APP_USER=arms_app_user
           POSTGRES_APP_PASSWORD=arms_app_qwerty
           APP_PORT=8000
-          EOF
+          'EOF'
         fi
 
     - name: 🐳 Start services
