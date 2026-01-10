@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  dev-app:
+    container_name: dev-app
+    build:
+      context: ../..
+      dockerfile: docker/develop/Dockerfile
+    volumes:
+      - ../../src:/app/src
+      - ../../test:/app/test
+    env_file:
+      - ../../.env
+    ports:
+      - "${APP_PORT}:8000"
+    stdin_open: true
+    tty: true
+    command: bash
+
+  dev-db:
+    container_name: dev-postgresql
+    image: postgres:15-alpine
+    volumes:
+      - ../../sql/init:/docker-entrypoint-initdb.d:ro
+      - ../../sql/bases:/sql/bases:ro
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_SOURCE=/sql/bases
+    env_file:
+      - ../../.env
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
