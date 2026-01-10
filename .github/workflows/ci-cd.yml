@@ -13,7 +13,7 @@ jobs:
     - name: 🔧 Load environment
       run: |
         if [ ! -f ".env" ]; then
-          cat > .env << EOF
+          cat > .env << 'EOF'
           POSTGRES_HOST=localhost
           POSTGRES_PORT=5432
           POSTGRES_DB=arms
