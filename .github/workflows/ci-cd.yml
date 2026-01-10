@@ -1,0 +1,42 @@
+name: Run tests
+
+on: [push]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🔧 Load environment
+      run: |
+        if [ ! -f ".env" ]; then
+          echo "POSTGRES_HOST=localhost" > .env
+          echo "POSTGRES_PORT=5432" >> .env
+          echo "POSTGRES_DB=arms" >> .env
+          echo "POSTGRES_SCHEMA=arms_schema" >> .env
+          echo "POSTGRES_USER=arms_admin" >> .env
+          echo "POSTGRES_PASSWORD=arms_qwerty" >> .env
+          echo "POSTGRES_APP_USER=arms_app_user" >> .env
+          echo "POSTGRES_APP_PASSWORD=arms_app_qwerty" >> .env
+          echo "APP_PORT=8000" >> .env
+        fi
+
+    - name: 🐳 Start services
+      run: |
+        docker compose -f docker/develop/docker-compose.yml up -d
+    
+    - name: ⏳ Wait for services
+      run: |
+        sleep 10
+        docker compose -f docker/develop/docker-compose.yml ps
+    
+    - name: 🧪 Run tests
+      run: |
+        docker compose -f docker/develop/docker-compose.yml exec -T dev-app pytest test/ -v
+    
+    - name: 🧹 Cleanup
+      if: always()
+      run: docker compose -f docker/develop/docker-compose.yml down -v
