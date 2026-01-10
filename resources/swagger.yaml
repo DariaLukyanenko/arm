@@ -1,0 +1,2069 @@
+openapi: 3.0.0
+info:
+  title: Автоматизированная система управления требованиями (АСУТр)
+  description: |
+    API для системы управления требованиями согласно ТЗ ГОСТ 34.602-2020.
+    Система предоставляет функционал для управления требованиями, их версионированием,
+    согласованием, трассировкой и интеграцией со смежными системами.
+  version: 1.0.0
+  contact:
+    name: АО "МИФИСТ"
+    url: https://mifist.example.com
+    email: support@mifist.example.com
+servers:
+  - url: https://api.asut.example.com/v1
+    description: Production server
+  - url: http://localhost:8000/v1
+    description: Development server
+
+tags:
+  - name: Пользователи
+    description: Управление пользователями системы
+  - name: Проекты
+    description: Управление проектами
+  - name: Требования
+    description: Управление требованиями и их содержимым
+  - name: Workflow
+    description: Управление жизненным циклом требований
+  - name: Обсуждения
+    description: Комментарии и обсуждения требований
+  - name: Зависимости
+    description: Управление связями между требованиями
+  - name: Роли и права
+    description: Управление ролями и разрешениями
+  - name: Тестирование
+    description: Покрытие требований тест-кейсами
+  - name: Администрирование
+    description: Административные функции системы
+
+paths:
+  # ================ Аутентификация и пользователи ================
+  /auth/login:
+    post:
+      tags: [Пользователи]
+      summary: Вход в систему
+      description: Аутентификация пользователя через SSO/LDAP, в таблице user проверяется поле status - если inactive, то не даем разрешение на вход, отправляем код ответа 403
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Успешная аутентификация
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Неверные учетные данные
+        '403':
+          description: Пользователь неактивен
+
+  /auth/logout:
+    post:
+      tags: [Пользователи]
+      summary: Выход из системы
+      description: Завершение сессии пользователя, инвалидация JWT токена
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Успешный выход из системы
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Пользователь успешно вышел из системы"
+                  logged_out_at:
+                    type: string
+                    format: date-time
+                    example: "2023-12-01T15:30:00Z"
+        '401':
+          description: Неверный или отсутствующий токен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                details: "Недействительный токен"
+                error: "INVALID_TOKEN"
+        '400':
+          description: Токен уже недействителен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                details: "Токен уже деактивирован"
+                error: "TOKEN_ALREADY_REVOKED"
+
+  /users:
+    get:
+      tags: [Пользователи]
+      summary: Получить список пользователей
+      description: |
+        Получение списка пользователей с пагинацией и фильтрацией.
+        Доступно только администраторам. Поля в схеме User surname, name, email, берутся по запросу из SSO, так как хранятся там.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive]
+      responses:
+        '200':
+          description: Список пользователей
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+        '403':
+          description: Нет прав доступа
+
+    post:
+      tags: [Пользователи]
+      summary: Создать пользователя
+      description: Создание нового пользователя (для интеграции с SSO/LDAP). Проверяется external_id в таблице Person. Должна быть проверка на дубли по login, surname, name. В случае полного совпадения surname и name из SSO считается дубликатом. При создании пользователя ему присваивается глобальная роль по умолчанию (Пользователь),в таблице User заполняется поле global_role_id, в таблице User появляется новая запись, присваивается внутренний id, роль меняет администратор.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+      responses:
+        '201':
+          description: Пользователь создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '409':
+          description: Пользователь с таким login уже существует
+
+  /users/{user_id}:
+    get:
+      tags: [Пользователи]
+      summary: Получить информацию о пользователе.
+      description: Данные по схеме User берутся из SSO (система делает запрос)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Информация о пользователе. Содержит данные о проектных ролях
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDetail'
+        '404':
+          description: Пользователь не найден
+
+  /users/{user_id}/changestatus:
+    post:
+      tags: [Пользователи]
+      summary: Изменить статус пользователя
+      description: Изменение статуса пользователя в системе (active/inactive). В случае успешного запроса новый статус сохраняется в поле Status таблицы User. В ответе возвращается обновленный статус пользователя
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: Идентификатор пользователя
+          schema:
+            type: integer
+            minimum: 1
+        - name: status
+          in: query
+          required: true
+          description: Новый статус пользователя
+          schema:
+            type: string
+            enum: [active, inactive]
+      responses:
+        '200':
+          description: Статус пользователя успешно изменен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserUpdate'
+        '400':
+          description: Некорректный статус
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Пользователь не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Недостаточно прав для изменения статуса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /users/{user_id}/changeprojectrole:
+    post:
+      tags: [Пользователи]
+      summary: Управление ролями пользователя по проекту
+      description: Управление ролями пользователя в проекте. Права доступа admin_view. Управлляется путем передачи массива ролей, Для UI сначала получаем список ролей пользователя, потом получаем действия от пользователя - удалить роль или добавить новую, выполняется мердж - роль удаляется из полученного массива или же добавляется. Далее сформированный массив User_Project_Role отправляется на сервер, в таблице User_project_role все записи с user_id сверяются с табличными, удаляются и добавляются. При пустом массиве у пользователя нет прав на проект
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: Идентификатор пользователя
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserProjecRoletList'
+      responses:
+        '200':
+          description: Список ролей пользователя обновился
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProjecRoletList'
+        '403':
+          description: Недостаточно прав для изменения ролец
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ================ Проекты ================
+  /projects:
+    get:
+      tags: [Проекты]
+      summary: Получить список проектов
+      description: Получение списка проектов с возможностью фильтрации, в случае отсутствия - возвращать пустой массив. Проверять права на просмотр проекта, возыращать только доступные
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: created_by
+          in: query
+          schema:
+            type: integer
+        - name: user_id
+          required: true
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Список проектов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectList'
+        '403':
+          description: Недостаточно прав для просмотр списка проектов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      tags: [Проекты]
+      summary: Создать проект
+      description: Создание нового проекта, проверка прав на PROJECT_CREATE. В таблице project поле created_by_user_id заполняется по идентификатору текущего пользователя, role_id
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+      responses:
+        '201':
+          description: Проект создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '403':
+          description: Недостаточно прав для создания проекта
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Проект с таким названием уже существует
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /projects/{project_id}:
+    get:
+      tags: [Проекты]
+      summary: Получить информацию о проекте
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Информация о проекте
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '403':
+          description: Недостаточно прав для чтения проекта
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      tags: [Проекты]
+      summary: Обновить проект (возможно изменить описание проекта)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdate'
+      responses:
+        '200':
+          description: Проект обновлен
+        '403':
+          description: Недостаточно прав для обнлвления проекта
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      tags: [Проекты]
+      summary: Удалить проект
+      description: Полное удаление проекта со всеми связанными требованиями, обсуждениями и историей (в результате должна быть удалена информация из всех таблиц), для UI перед отправкой данного запроса обязано всплыть предупреждение с требованием подтвердить действие
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Проект успешно удален
+        '403':
+          description: Недостаточно прав для удаления проекта
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Проект не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Проект нельзя удалить (есть активные зависимости)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /projects/{project_id}/requirements:
+    get:
+      tags: [Проекты, Требования]
+      summary: Получить требования проекта
+      description: Получение всех требований проекта
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Список требований проекта
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementListResponse'
+
+  # ================ Требования ================
+  /requirements:
+    get:
+      tags: [Требования]
+      summary: Получить список требований с фильтрами
+      description: Получение списка требований с возможностью фильтрации по типу, проекту и статусу
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: project_id
+          in: query
+          description: Фильтр по проекту
+          schema:
+            type: integer
+            minimum: 1
+          example: 1
+        - name: type
+          in: query
+          description: Фильтр по типу требования
+          schema:
+            type: string
+            enum: [functional, non-functional, business]
+          example: "functional"
+        - name: status
+          in: query
+          description: Фильтр по статусу требования
+          schema:
+            type: string
+            enum: [draft, review, approved, rejected, completed]
+          example: "approved"
+        - name: created_by
+          in: query
+          description: Фильтр по создателю требования
+          schema:
+            type: integer
+            minimum: 1
+          example: 1
+        - name: priority
+          in: query
+          description: Фильтр по приоритету
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5
+            example: 1
+
+      responses:
+        '200':
+          description: Список требований
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementListResponse'
+        '400':
+          description: Некорректные параметры фильтрации
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Недостаточно прав для просмотра требований
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      tags: [Требования]
+      summary: Создать требование
+      description: Создание нового требования с валидацией данных
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementCreate'
+      responses:
+        '201':
+          description: Требование создано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementFull'
+
+  /requirements/{requirement_id}:
+    get:
+      tags: [Требования]
+      summary: Получить требование
+      description: Получение полной информации о требовании
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Информация о требовании
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementFull'
+
+    put:
+      tags: [Требования]
+      summary: Обновить требование
+      description: Обновление требования с версионированием
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementUpdate'
+      responses:
+        '200':
+          description: Требование обновлено
+        '409':
+          description: Конфликт версий
+
+    delete:
+      tags: [Требования]
+      summary: Удалить требование
+      description: Удаление требования (мягкое удаление)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Требование удалено
+
+  /requirements/export:
+    get:
+      tags: [Требования]
+      summary: Экспорт требований в CSV
+      description: Экспорт списка требований с примененными фильтрами в формате CSV
+      security:
+        - bearerAuth: []
+      parameters:
+        # Все те же параметры фильтрации что и в /requirements
+        - name: project_id
+          in: query
+          description: Фильтр по проекту
+          schema:
+            type: integer
+            minimum: 1
+        - name: type
+          in: query
+          description: Фильтр по типу требования
+          schema:
+            type: string
+            enum: [functional, non-functional, business]
+        - name: status
+          in: query
+          description: Фильтр по статусу требования
+          schema:
+            type: string
+            enum: [draft, review, approved, rejected, completed]
+        # Дополнительные параметры для экспорта
+        - name: fields
+          in: query
+          description: Поля для экспорта (через запятую)
+          schema:
+            type: string
+            example: "id,name,type,status,priority,created_at,created_by"
+        - name: filename
+          in: query
+          description: Имя файла (без расширения)
+          schema:
+            type: string
+            example: "requirements_export"
+      responses:
+        '200':
+          description: CSV файл с требованиями
+          headers:
+            Content-Disposition:
+              description: Заголовок для скачивания файла
+              schema:
+                type: string
+                example: 'attachment; filename="requirements_export_20231201.csv"'
+            Content-Type:
+              description: MIME тип
+              schema:
+                type: string
+                example: "text/csv; charset=utf-8"
+          content:
+            text/csv:
+              schema:
+                type: string
+                example: |
+                  ID,Name,Type,Status,Priority,Created At,Created By
+                  1,"User Authentication",functional,approved,5,"2023-12-01 10:00:00","Ivan Ivanov"
+                  2,"Data Validation",non-functional,review,4,"2023-12-01 11:00:00","Petr Petrov"
+        '400':
+          description: Некорректные параметры экспорта
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Слишком много данных для экспорта
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                detail: "Превышен лимит экспорта. Максимум 10000 записей"
+                error_code: "EXPORT_LIMIT_EXCEEDED"
+
+  /requirements/{requirement_id}/content:
+    get:
+      tags: [Требования]
+      summary: Получить содержимое требования
+      description: Получение текущего содержимого требования
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Содержимое требования
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementContent'
+
+    put:
+      tags: [Требования]
+      summary: Обновить содержимое требования
+      description: Обновление содержимого с созданием новой версии
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementContentUpdate'
+      responses:
+        '200':
+          description: Содержимое обновлено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementContent'
+
+  /requirements/{requirement_id}/content/history:
+    get:
+      tags: [Требования]
+      summary: История изменений содержимого
+      description: Получение истории изменений содержимого требования
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: История изменений
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentHistoryList'
+
+  /requirements/{requirement_id}/workflow:
+    get:
+      tags: [Workflow]
+      summary: Получить текущий статус workflow
+      description: Получение текущего состояния workflow требования
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Текущий статус workflow
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowStatus'
+
+    post:
+      tags: [Workflow]
+      summary: Изменить статус workflow
+      description: Изменение статуса требования в соответствии с workflow,
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowTransition'
+      responses:
+        '200':
+          description: Статус изменен
+        '400':
+          description: Недопустимый переход статуса
+        '403':
+          description: Нет прав для изменения статуса
+
+  /requirements/{requirement_id}/workflow/history:
+    get:
+      tags: [Workflow]
+      summary: История изменений workflow
+      description: Получение истории изменений статуса требования
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: История workflow
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowHistoryList'
+
+  # ================ Согласование требований ================
+  /requirements/{requirement_id}/approval:
+    post:
+      tags: [Workflow]
+      summary: Запустить процесс согласования - 'это значит переместить в статус На проверке (Review)'
+      description: Запуск процесса согласования требования
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Процесс согласования запущен
+        '400':
+          description: Недопустимый переход статуса
+        '403':
+          description: Нет прав для изменения статуса
+
+  /requirements/{requirement_id}/approve:
+    post:
+      tags: [Workflow]
+      summary: Утвердить требование
+      description: Утверждение требования уполномоченным лицом
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment:
+                  type: string
+      responses:
+        '200':
+          description: Требование утверждено
+        '403':
+          description: Нет прав на утверждение
+
+  /requirements/{requirement_id}/reject:
+    post:
+      tags: [Workflow]
+      summary: Отклонить требование
+      description: Отклонение требования с комментарием
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - comment
+                - reason
+              properties:
+                comment:
+                  type: string
+                reason:
+                  type: string
+                  enum: [incorrect, incomplete, duplicate, outdated]
+      responses:
+        '200':
+          description: Требование отклонено
+        '403':
+          description: Нет прав на отклонение
+
+  # ================ Обсуждения и комментарии ================
+  # /requirements/{requirement_id}/discussions:
+  #   get:
+  #     tags: [Обсуждения]
+  #     summary: Получить обсуждения требования
+  #     description: Получение всех обсуждений по требованию
+  #     security:
+  #       - bearerAuth: []
+  #     parameters:
+  #       - name: requirement_id
+  #         in: path
+  #         required: true
+  #         schema:
+  #           type: integer
+  #     responses:
+  #       '200':
+  #         description: Список обсуждений
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: '#/components/schemas/DiscussionList'
+
+    # post:
+    #   tags: [Обсуждения]
+    #   summary: Создать обсуждение
+    #   description: Создание нового обсуждения по требованию
+    #   security:
+    #     - bearerAuth: []
+    #   parameters:
+    #     - name: requirement_id
+    #       in: path
+    #       required: true
+    #       schema:
+    #         type: integer
+    #   requestBody:
+    #     required: true
+    #     content:
+    #       application/json:
+    #         schema:
+    #           $ref: '#/components/schemas/DiscussionCreate'
+    #   responses:
+    #     '201':
+    #       description: Обсуждение создано
+
+  # /discussions/{discussion_id}/comments:
+  #   get:
+  #     tags: [Обсуждения]
+  #     summary: Получить комментарии обсуждения
+  #     description: Получение всех комментариев в обсуждении
+  #     security:
+  #       - bearerAuth: []
+  #     parameters:
+  #       - name: discussion_id
+  #         in: path
+  #         required: true
+  #         schema:
+  #           type: integer
+  #     responses:
+  #       '200':
+  #         description: Список комментариев
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: '#/components/schemas/CommentList'
+
+  #   post:
+  #     tags: [Обсуждения]
+  #     summary: Добавить комментарий
+  #     description: Добавление комментария к обсуждению
+  #     security:
+  #       - bearerAuth: []
+  #     parameters:
+  #       - name: discussion_id
+  #         in: path
+  #         required: true
+  #         schema:
+  #           type: integer
+  #     requestBody:
+  #       required: true
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: '#/components/schemas/CommentCreate'
+  #     responses:
+  #       '201':
+  #         description: Комментарий добавлен
+
+  # ================ Зависимости требований ================
+  /requirements/{requirement_id}/dependencies:
+    get:
+      tags: [Зависимости]
+      summary: Получить зависимости требования
+      description: Получение всех зависимостей требования (описать селект к бд)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [incoming, outgoing, both]
+            default: both
+      responses:
+        '200':
+          description: Список зависимостей
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DependencyList'
+
+    post:
+      tags: [Зависимости]
+      summary: Создать зависимость
+      description: Создание новой зависимости между требованиями (описать переход зависимостей типов требований)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DependencyCreate'
+      responses:
+        '201':
+          description: Зависимость создана
+        '400':
+          description: Недопустимая зависимость
+
+  /dependencies/{dependency_id}:
+    delete:
+      tags: [Зависимости]
+      summary: Удалить зависимость
+      description: Удаление зависимости между требованиями
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: dependency_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Зависимость удалена
+
+  # ================ Трассировка требований ================
+  /requirements/{requirement_id}/traceability:
+    get:
+      tags: [Требования]
+      summary: Матрица трассируемости
+      description: Получение матрицы трассируемости требования (другие тербваония, тест-кейсы, написать селект, который бв это описывал)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: depth
+          in: query
+          schema:
+            type: integer
+            default: 2
+      responses:
+        '200':
+          description: Матрица трассируемости
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TraceabilityMatrix'
+
+  # ================ Покрытие тест-кейсами ================
+  /requirements/{requirement_id}/test-coverage:
+    get:
+      tags: [Тестирование]
+      summary: Получить покрытие тест-кейсами
+      description: Получение информации о покрытии требования тест-кейсами
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Покрытие тест-кейсами
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestCoverage'
+
+    post:
+      tags: [Тестирование]
+      summary: Обновить покрытие тест-кейсами
+      description: Обновление информации о покрытии тест-кейсами
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirement_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestCoverageUpdate'
+      responses:
+        '200':
+          description: Покрытие обновлено
+
+  # ================ Отчетность и аналитика ================
+  /reports/kpi:
+    get:
+      tags: [Администрирование]
+      summary: Дашборд KPI
+      description: Получение дашборда с ключевыми показателями эффективности
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: project_id
+          in: query
+          schema:
+            type: integer
+        - name: period_start
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: period_end
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Дашборд KPI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KPIDashboard'
+
+  /reports/requirements:
+    get:
+      tags: [Администрирование]
+      summary: Отчет по требованиям
+      description: Генерация отчета по требованиям
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, pdf, csv]
+            default: json
+        - name: include_history
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Отчет по требованиям
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementsReport'
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+            text/csv:
+              schema:
+                type: string
+                format: binary
+
+  /reports/traceability:
+    get:
+      tags: [Администрирование]
+      summary: Отчет по трассируемости
+      description: Генерация отчета по трассируемости требований
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Отчет по трассируемости
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TraceabilityReport'
+
+  # ================ Администрирование ================
+  /admin/roles:
+    get:
+      tags: [Администрирование]
+      summary: Получить список ролей
+      description: Получение списка всех ролей в системе
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Список ролей
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleList'
+
+    post:
+      tags: [Администрирование]
+      summary: Создать роль
+      description: Создание новой роли
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleCreate'
+      responses:
+        '201':
+          description: Роль создана
+
+  /admin/permissions:
+    get:
+      tags: [Администрирование]
+      summary: Получить список разрешений
+      description: Получение списка всех разрешений в системе
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Список разрешений
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PermissionList'
+
+  # ================ Интеграции ================
+  /integrations/test-systems/{system_name}/status:
+    post:
+      tags: [Администрирование]
+      summary: Импорт статусов тестов
+      description: Импорт статусов тест-кейсов из внешней системы тестирования
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: system_name
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [jira, testrail, qtest, custom]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestStatusImport'
+      responses:
+        '200':
+          description: Статусы импортированы
+        '400':
+          description: Ошибка валидации данных
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # ================ Базовые схемы ================
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        pages:
+          type: integer
+
+    # ================ Пользователи ================
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        token_type:
+          type: string
+        expires_in:
+          type: integer
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        external_id:
+          type: string
+        login:
+          type: string
+          description: Логин пользователя (хранится в SSO)
+        surname:
+          type: string
+          description: Фамилия пользователя (хранится в SSO)
+        name:
+          type: string
+          description: Имя пользователя (хранится в SSO)
+        email:
+          type: string
+          format: email
+          description: Электронная почта пользователя (хранится в SSO)
+        status:
+          type: string
+          enum: [active, inactive]
+        datetime_created:
+          type: string
+          format: date-time
+
+    UserDetail:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            project_roles:
+              type: array
+              items:
+                $ref: '#/components/schemas/UserProjectRole'
+            global_roles:
+              type: integer
+    UserCreate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [active, inactive]
+          default: active
+        login:
+          type: string
+        name:
+          type: string
+        surname:
+          type: string
+        email:
+          type: string
+
+    UserUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [active, inactive]
+
+    UserListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    UserProjectRole:
+      type: object
+      properties:
+        project_id:
+          type: integer
+        project_name:
+          type: string
+        role_id:
+          type: integer
+        role_code:
+          type: string
+        role_name:
+          type: string
+
+    UserProjecRoletList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserProjectRole'
+
+    # ================ Проекты ================
+    Project:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, archived, draft]
+        created_by_user_id:
+          type: integer
+
+    ProjectCreate:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        status:
+          type: string
+          enum: [active, draft]
+          default: active
+
+    ProjectUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        status:
+          type: string
+          enum: [active, archived]
+
+    ProjectList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+
+    # ================ Требования ================
+    Requirement:
+      type: object
+      properties:
+        id:
+          type: integer
+        project_id:
+          type: integer
+        name:
+          type: string
+        type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        created_by_user_id:
+          type: integer
+        path:
+          type: string
+        depth:
+          type: integer
+        requirement_group_id:
+          type: integer
+
+    RequirementFull:
+      allOf:
+        - $ref: '#/components/schemas/Requirement'
+        - type: object
+          properties:
+            content:
+              $ref: '#/components/schemas/RequirementContent'
+            workflow:
+              $ref: '#/components/schemas/RequirementWorkflow'
+            dependencies:
+              type: array
+              items:
+                $ref: '#/components/schemas/Dependency'
+
+    RequirementCreate:
+      type: object
+      required:
+        - project_id
+        - name
+        - description_text
+      properties:
+        project_id:
+          type: integer
+        name:
+          type: string
+          maxLength: 255
+        type:
+          type: string
+        parent_id:
+          type: integer
+        content:
+          $ref: '#/components/schemas/RequirementContentCreate'
+
+    RequirementUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        type:
+          type: string
+
+    RequirementListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequirementFull'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    # ================ Содержимое требований ================
+    RequirementContent:
+      type: object
+      properties:
+        id:
+          type: integer
+        development_basis:
+          type: string
+        development_purpose:
+          type: string
+        description_text:
+          type: string
+        acceptance_criteria:
+          type: string
+        document_requires:
+          type: string
+        requirement_id:
+          type: integer
+
+    RequirementContentCreate:
+      type: object
+      properties:
+        development_basis:
+          type: string
+        development_purpose:
+          type: string
+        description_text:
+          type: string
+        acceptance_criteria:
+          type: string
+        document_requires:
+          type: string
+
+    RequirementContentUpdate:
+      type: object
+      properties:
+        development_basis:
+          type: string
+        development_purpose:
+          type: string
+        description_text:
+          type: string
+        acceptance_criteria:
+          type: string
+        document_requires:
+          type: string
+
+    ContentHistoryList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentHistoryItem'
+
+    ContentHistoryItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        prev_req_content_id:
+          type: integer
+        created_by_user_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        is_active:
+          type: boolean
+        content:
+          $ref: '#/components/schemas/RequirementContent'
+
+    # ================ Workflow ================
+    RequirementWorkflow:
+      type: object
+      properties:
+        id:
+          type: integer
+        requirement_content_id:
+          type: integer
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 5
+        status:
+          type: string
+          enum: [draft, review, approved, rejected, implemented, verified, archived]
+
+    WorkflowStatus:
+      allOf:
+        - $ref: '#/components/schemas/RequirementWorkflow'
+        - type: object
+          properties:
+            requirement_name:
+              type: string
+            can_transition_to:
+              type: array
+              items:
+                type: string
+
+    WorkflowTransition:
+      type: object
+      required:
+        - new_status
+      properties:
+        new_status:
+          type: string
+          enum: [draft, review, approved, rejected, implemented, verified, archived]
+        comment:
+          type: string
+
+    WorkflowHistoryList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowHistoryItem'
+
+    WorkflowHistoryItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        prev_req_workflow_id:
+          type: integer
+        created_by_user_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        is_active:
+          type: boolean
+        workflow:
+          $ref: '#/components/schemas/RequirementWorkflow'
+
+    # ================ Обсуждения ================
+    # Comment:
+    #   type: object
+    #   properties:
+    #     id:
+    #       type: integer
+    #     discussion_id:
+    #       type: integer
+    #     created_by_user_id:
+    #       type: integer
+    #     created_at:
+    #       type: string
+    #       format: date-time
+    #     content:
+    #       type: string
+
+    # CommentCreate:
+    #   type: object
+    #   required:
+    #     - content
+    #   properties:
+    #     content:
+    #       type: string
+
+    # CommentList:
+    #   type: object
+    #   properties:
+    #     data:
+    #       type: array
+    #       items:
+    #         $ref: '#/components/schemas/Comment'
+
+    # ================ Зависимости ================
+    Dependency:
+      type: object
+      properties:
+        id:
+          type: integer
+        target_requirement_id:
+          type: integer
+        source_requirement_id:
+          type: integer
+        type:
+          type: string
+          enum: [blocks, depends_on, related_to, duplicates, refines]
+        strength:
+          type: integer
+          minimum: 1
+          maximum: 5
+        description:
+          type: string
+        source_requirement_group_id:
+          type: integer
+        target_requirement_group_id:
+          type: integer
+
+    DependencyCreate:
+      type: object
+      required:
+        - target_requirement_id
+        - type
+      properties:
+        target_requirement_id:
+          type: integer
+        type:
+          type: string
+          enum: [blocks, depends_on, related_to, duplicates, refines]
+        strength:
+          type: integer
+          minimum: 1
+          maximum: 5
+          default: 3
+        description:
+          type: string
+
+    DependencyList:
+      type: object
+      properties:
+        incoming:
+          type: array
+          items:
+            $ref: '#/components/schemas/Dependency'
+        outgoing:
+          type: array
+          items:
+            $ref: '#/components/schemas/Dependency'
+
+    # ================ Трассировка ================
+    TraceabilityMatrix:
+      type: object
+      properties:
+        requirement_id:
+          type: integer
+        requirement_name:
+          type: string
+        source:
+          type: array
+          items:
+            $ref: '#/components/schemas/TraceabilityItem'
+        target:
+          type: array
+          items:
+            $ref: '#/components/schemas/TraceabilityItem'
+
+    TraceabilityItem:
+      type: object
+      properties:
+        requirement_id:
+          type: integer
+        requirement_name:
+          type: string
+
+    # ================ Тестирование ================
+    TestCoverage:
+      type: object
+      properties:
+        test_case_version_id:
+          type: string
+        requirement_id:
+          type: integer
+        created_by_user_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        test_case_status:
+          type: string
+          enum: [passed, failed, blocked, not_executed]
+
+    TestCoverageUpdate:
+      type: object
+      required:
+        - test_case_version_id
+        - test_case_status
+      properties:
+        test_case_version_id:
+          type: string
+        test_case_status:
+          type: string
+          enum: [passed, failed, blocked, not_executed]
+
+    TestStatusImport:
+      type: object
+      required:
+        - test_cases
+      properties:
+        test_cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestCaseStatus'
+
+    TestCaseStatus:
+      type: object
+      required:
+        - test_case_id
+        - requirement_id
+        - status
+      properties:
+        test_case_id:
+          type: string
+        requirement_id:
+          type: integer
+        status:
+          type: string
+          enum: [passed, failed, blocked, not_executed]
+        execution_date:
+          type: string
+          format: date-time
+
+    # ================ Отчетность ================
+    KPIDashboard:
+      type: object
+      properties:
+        period:
+          type: object
+          properties:
+            start:
+              type: string
+              format: date
+            end:
+              type: string
+              format: date
+        metrics:
+          type: object
+          properties:
+            total_requirements:
+              type: integer
+            requirements_approved:
+              type: integer
+            requirements_approval:
+              type: integer
+            requirements_rejected:
+              type: integer
+
+    RequirementsReport:
+      type: object
+      properties:
+        project_id:
+          type: integer
+        project_name:
+          type: string
+        generated_at:
+          type: string
+          format: date-time
+        requirements:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequirementFull'
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+            by_type:
+              type: object
+            by_status:
+              type: object
+
+    TraceabilityReport:
+      type: object
+      properties:
+        project_id:
+          type: integer
+        project_name:
+          type: string
+        generated_at:
+          type: string
+          format: date-time
+        traceability_matrix:
+          type: array
+          items:
+            $ref: '#/components/schemas/TraceabilityReportItem'
+
+    TraceabilityReportItem:
+      type: object
+      properties:
+        requirement_id:
+          type: integer
+        requirement_name:
+          type: string
+        linked_to:
+          type: array
+          items:
+            type: integer
+        linked_from:
+          type: array
+          items:
+            type: integer
+        test_coverage:
+          type: boolean
+
+    # ================ Роли и права ================
+    Role:
+      type: object
+      properties:
+        id:
+          type: integer
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+
+    RoleCreate:
+      type: object
+      required:
+        - code
+        - name
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+
+    RoleList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+
+    Permission:
+      type: object
+      properties:
+        id:
+          type: integer
+        code:
+          type: string
+        description:
+          type: string
+
+    PermissionList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+
+    # ================ Аудит ================
+  responses:
+    Unauthorized:
+      description: Требуется аутентификация
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Unauthorized"
+            message: "Требуется аутентификация"
+            timestamp: "2025-01-10T10:30:00Z"
+
+    Forbidden:
+      description: Нет прав доступа
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Forbidden"
+            message: "Недостаточно прав для выполнения операции"
+            timestamp: "2025-01-10T10:30:00Z"
+
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Not Found"
+            message: "Запрошенный ресурс не найден"
+            timestamp: "2025-01-10T10:30:00Z"
+
+    ValidationError:
+      description: Ошибка валидации
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Validation Error"
+            message: "Ошибка валидации входных данных"
+            details:
+              field: "name"
+              error: "Обязательное поле"
+              timestamp: "2025-01-10T10:30:00Z"
