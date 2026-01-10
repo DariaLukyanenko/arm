@@ -39,4 +39,4 @@ jobs:
     
     - name: 🧹 Cleanup
       if: always()
-      run: docker-compose -f docker/develop/docker-compose.yml down -v
+      run: docker compose -f docker/develop/docker-compose.yml down -v
