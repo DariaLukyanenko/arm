@@ -9,3 +9,9 @@ grant usage on schema ${POSTGRES_SCHEMA} to ${POSTGRES_APP_USER};
 
 alter default privileges in schema ${POSTGRES_SCHEMA} grant
     select, insert, update, delete on tables to ${POSTGRES_APP_USER};
+
+-- Даем права на все sequences
+grant usage, select on all sequences in schema ${POSTGRES_SCHEMA} to ${POSTGRES_APP_USER};
+
+alter default privileges in schema ${POSTGRES_SCHEMA} grant
+    usage, select on sequences to ${POSTGRES_APP_USER};

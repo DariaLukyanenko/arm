@@ -9,6 +9,7 @@ services:
     volumes:
       - ../../src:/app/src
       - ../../test:/app/test
+      - ../../resources:/app/resources
     env_file:
       - ../../.env
     ports:
