@@ -1,0 +1,407 @@
+openapi: 3.0.0
+info:
+  title: API интеграции АСУТр с системой тестирования
+  description: |
+    API для синхронизации данных между системой управления требованиями (АСУТр)
+    и системами управления тестированием.
+    Предоставляет endpoints для обмена информацией о проектах, требованиях и тест-кейсах.
+  version: 1.0.0
+  contact:
+    name: АО "МИФИСТ"
+    url: https://mifist.example.com
+    email: integrations@mifist.example.com
+
+servers:
+  - url: https://api.asut.example.com/v1/integrations
+    description: Production integration server
+  - url: http://localhost:8000/v1/integrations
+    description: Development integration server
+
+tags:
+  - name: Тестирование
+    description: API для интеграции с системами управления тестированием
+  - name: Синхронизация
+    description: Endpoints для синхронизации данных
+
+paths:
+  # ================ API для системы тестирования ================
+  # Система тестирования → АСУТр (запросы от системы тестирования)
+  /integration/requirements-projects:
+    get:
+      tags: [Синхронизация]
+      summary: Получить список проектов для синхронизации
+      description: |
+        Возвращает список проектов, доступных для синхронизации с системой тестирования.
+        Система тестирования использует этот endpoint для получения списка проектов,
+        доступных для синхронизации требований и тест-кейсов.
+      security:
+        - apiKeyAuth: []
+      responses:
+        '200':
+          description: Список проектов успешно получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestSystemProjectList'
+        '400':
+          description: Некорректные параметры запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Недействительный API ключ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Нет прав доступа к интеграции
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /integration/projects/{project_id}/requirements:
+    get:
+      tags: [Синхронизация]
+      summary: Получить список требований проекта
+      description: |
+        Возвращает список требований указанного проекта для синхронизации с системой тестирования.
+        Система тестирования использует этот endpoint для получения требований проекта,
+        которые должны быть покрыты тест-кейсами.
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          description: Идентификатор проекта
+          schema:
+            type: integer
+            minimum: 1
+        - name: status
+          in: query
+          description: Фильтр по статусу требования
+          schema:
+            type: string
+            enum: [draft, review, approved, rejected, completed]
+        - name: type
+          in: query
+          description: Фильтр по типу требования
+          schema:
+            type: string
+            enum: [functional, non-functional, business]
+        - name: limit
+          in: query
+          description: Ограничение количества возвращаемых записей
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+            default: 1000
+        - name: offset
+          in: query
+          description: Смещение для пагинации
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Список требований проекта успешно получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementList'
+        '404':
+          description: Проект не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Недействительный API ключ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Нет прав доступа к проекту
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ================ API для запроса данных из системы тестирования ================
+  # АСУТр → Система тестирования (запросы из АСУТр к системе тестирования)
+  /test-systems/projects/test-cases:
+    get:
+      tags: [Тестирование]
+      summary: Получить тест-кейсы проекта из системы тестирования
+      description: |
+        Запрашивает у системы тестирования список тест-кейсов для указанного проекта.
+        Этот endpoint используется системой АСУТр для получения информации о покрытии
+        требований тест-кейсами из внешней системы тестирования.
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          description: Идентификатор проекта в системе управления требованиями
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Список тест-кейсов успешно получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestCaseList'
+        '404':
+          description: Проект не найден в системе тестирования
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Недействительный API ключ для системы тестирования
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API ключ для интеграции с внешними системами.
+        Ключ выдается администратором системы.
+      x-example: "asut_int_1234567890abcdef"
+
+  schemas:
+    # ================ Базовые схемы ================
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+
+    # ================ Схемы для проектов ================
+    TestSystemProjectList:
+      type: object
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestSystemProject'
+        sync_timestamp:
+          type: string
+          format: date-time
+          description: Время последней синхронизации
+        total_count:
+          type: integer
+          description: Общее количество проектов
+        filtered_count:
+          type: integer
+          description: Количество отфильтрованных проектов
+      example:
+        projects:
+          - id: 1
+            name: "Проект А"
+            code: "PROJ-A"
+            description: "Разработка новой платформы"
+            status: "active"
+            created_at: "2024-01-01T10:00:00Z"
+            updated_at: "2024-01-10T15:30:00Z"
+          - id: 2
+            name: "Проект Б"
+            code: "PROJ-B"
+            description: "Модернизация существующей системы"
+            status: "active"
+            created_at: "2024-02-01T09:00:00Z"
+            updated_at: "2024-02-05T14:20:00Z"
+        sync_timestamp: "2024-01-11T10:30:00Z"
+        total_count: 2
+        filtered_count: 2
+
+    TestSystemProject:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Идентификатор проекта в АСУТр
+        name:
+          type: string
+          description: Название проекта
+        code:
+          type: string
+          description: Код проекта
+        description:
+          type: string
+          description: Описание проекта
+        status:
+          type: string
+          description: Статус проекта
+          enum: [active, archived, draft]
+        created_at:
+          type: string
+          format: date-time
+          description: Дата создания проекта
+        updated_at:
+          type: string
+          format: date-time
+          description: Дата последнего обновления проекта
+        test_system_id:
+          type: string
+          description: Идентификатор проекта в системе тестирования (если настроена связь)
+
+    # ================ Схемы для требований ================
+    RequirementList:
+      type: object
+      properties:
+        project_id:
+          type: integer
+          description: Идентификатор проекта
+        project_name:
+          type: string
+          description: Название проекта
+        requirements:
+          type: array
+          items:
+            $ref: '#/components/schemas/Requirement'
+        total_count:
+          type: integer
+          description: Общее количество требований
+        pagination:
+          type: object
+          properties:
+            limit:
+              type: integer
+            offset:
+              type: integer
+      example:
+        project_id: 1
+        project_name: "Проект А"
+        requirements:
+          - id: 101
+            name: "Аутентификация пользователя"
+            description: "Пользователь должен иметь возможность аутентифицироваться в системе"
+            status: "approved"
+            priority: 5
+            type: "functional"
+            created_at: "2024-01-02T10:00:00Z"
+            updated_at: "2024-01-09T14:30:00Z"
+            version: 2
+            has_test_coverage: true
+        sync_timestamp: "2024-01-11T10:30:00Z"
+        total_count: 2
+        filtered_count: 2
+        pagination:
+          limit: 100
+          offset: 0
+          has_more: false
+
+    Requirement:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Идентификатор требования в АСУТр
+        name:
+          type: string
+          description: Название требования
+        status:
+          type: string
+          description: Статус требования
+          enum: [draft, review, approved, rejected, completed]
+        type:
+          type: string
+          description: Тип требования
+          enum: [functional, non-functional, business]
+
+    # ================ Схемы для тест-кейсов ================
+    TestCaseList:
+      type: object
+      properties:
+        project_id:
+          type: string
+          description: Идентификатор проекта в системе управления требованиями
+        project_name:
+          type: string
+          description: Название проекта в системе тестирования
+        test_cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestCase'
+        total_count:
+          type: integer
+          description: Общее количество тест-кейсов
+      example:
+        project_id: "P123"
+        project_name: "Проект А"
+        test_cases:
+          - requirement_id: 101
+            test_case_id: "TC-001"
+            test_case_name: "Тест аутентификации с корректными данными"
+            test_case_status: "passed"
+        total_count: 1
+
+    TestCase:
+      type: object
+      required:
+        - requirement_id
+        - test_case_id
+        - test_case_status
+      properties:
+        requirement_id:
+          type: integer
+          description: Идентификатор требования в АСУТр
+        test_case_id:
+          type: string
+          description: Идентификатор тест-кейса в системе тестирования
+        test_case_name:
+          type: string
+          description: Название тест-кейса
+        test_case_status:
+          type: string
+          description: Статус тест-кейса
+          enum: [passed, failed, blocked, not_executed, retest, in_progress]
+
+  # ================ Примеры ответов ================
+  responses:
+    InvalidApiKey:
+      description: Недействительный или отсутствующий API ключ
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "INVALID_API_KEY"
+            message: "Предоставлен недействительный API ключ"
+            timestamp: "2025-01-10T10:30:00Z"
+
+    RateLimitExceeded:
+      description: Превышен лимит запросов
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "RATE_LIMIT_EXCEEDED"
+            message: "Превышен лимит запросов. Попробуйте позже"
+            details:
+              limit: 100
+              reset_in: 3600
+            timestamp: "2025-01-10T10:30:00Z"

@@ -1267,33 +1267,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/PermissionList'
 
-  # ================ Интеграции ================
-  /integrations/test-systems/{system_name}/status:
-    post:
-      tags: [Администрирование]
-      summary: Импорт статусов тестов
-      description: Импорт статусов тест-кейсов из внешней системы тестирования
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: system_name
-          in: path
-          required: true
-          schema:
-            type: string
-            enum: [jira, testrail, qtest, custom]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TestStatusImport'
-      responses:
-        '200':
-          description: Статусы импортированы
-        '400':
-          description: Ошибка валидации данных
-
 components:
   securitySchemes:
     bearerAuth:
