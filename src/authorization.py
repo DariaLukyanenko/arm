@@ -22,7 +22,7 @@ class UserDependency:
             return admin[0]
 
         current_user = JWTHandler.decode_token(token)
-        user = await UserDAO.get(session=session, obj_id=current_user['external_id'])
+        user = await UserDAO.get(session=session, obj_id=current_user['user_id'])
 
         request.state.user = user
         return user
