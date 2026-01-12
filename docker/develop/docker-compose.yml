@@ -12,7 +12,7 @@ services:
     env_file:
       - ../../.env
     ports:
-      - "${APP_PORT}:8000"
+      - "8000:8000"
     stdin_open: true
     tty: true
     command: bash
@@ -29,7 +29,7 @@ services:
     env_file:
       - ../../.env
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "5432:5432"
     restart: unless-stopped
 
 volumes:
