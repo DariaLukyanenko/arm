@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import String, ForeignKey
+from sqlalchemy import String, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.database.base_model import Base
@@ -11,10 +11,18 @@ class Requirement(Base):
     name: Mapped[str] = mapped_column(String(255))
     type: Mapped[str] = mapped_column(String(255))
     path: Mapped[str] = mapped_column(String(255))
-    depth: Mapped[str] = mapped_column(String(255))
-    description_text: Mapped[str] = mapped_column(String(1023))
+    depth: Mapped[int] = mapped_column(Integer)
+    parent_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("requirements.id", ondelete="SET NULL"),
+        nullable=True
+    )
 
     # Foreign Keys
-    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"))
-    created_by_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    # requirement_group_id: Mapped[UUID] = mapped_column(ForeignKey())  TODO дописать как появится модель
+    project_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True
+    )

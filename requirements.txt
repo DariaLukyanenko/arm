@@ -8,3 +8,6 @@ pyjwt==2.10.1
 asyncpg==0.31.0
 greenlet==3.3.0
 alembic==1.18.0
+pydantic_settings==2.12.0
+inflect==7.5.0
+pyjwt==2.10.1
