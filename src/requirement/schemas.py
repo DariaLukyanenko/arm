@@ -16,3 +16,11 @@ class RequirementResponse(BaseModel):
     project_id: UUID = Field(description='ID проекта')
     name: str = Field(description='Название')
     description_text: str = Field(description='Описание')
+
+
+class Requirement(BaseModel):
+    pass  # TODO переделать под схемы из swagger.yaml
+
+
+class RequirementListResponse(BaseModel):
+    data: list[Requirement]

@@ -1,6 +1,7 @@
 import uvicorn
 from fastapi import FastAPI
 
+from src.project.routers import project_router
 from src.project_config import settings
 from src.requirement.routers import requirement_router
 
@@ -10,7 +11,7 @@ def get_application() -> FastAPI:
         title=settings.PROJECT_NAME
     )
     application.include_router(requirement_router)
-
+    application.include_router(project_router)
 
     return application
 
